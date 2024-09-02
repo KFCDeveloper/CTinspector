@@ -47,7 +47,7 @@
                         "-r", "128", 
                         "-g", "1", 
                         "-t", "0", 
-                        "-f", "-/home/ydy/projects/CTinspector-master/ebpf_example/vm_migrate.o",
+                        "-f", "/home/ydy/projects/CTinspector-master/ebpf_example/vm_migrate.o",
                         ], // 用于设置程序的传入参数
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

@@ -138,7 +138,10 @@ struct ebpf_vm *create_vm_from_elf(const char *elf_file_name)
 	struct mp_elf_context ctx = {0};
 	int32_t fd, main_offset;
 	
+	printf("elf_file_name: %s, O_RDONLY: %d",elf_file_name,O_RDONLY);
 	fd = open(elf_file_name, O_RDONLY);
+
+	printf("fd: %d\n", fd);
 	if (fd < 0) {
 		printf("Failed to open file %s\n", elf_file_name);
 		return NULL;
