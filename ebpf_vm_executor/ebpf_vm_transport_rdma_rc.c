@@ -259,17 +259,12 @@ static int pkt_vm_rdma_post_recv(struct pkt_vm_rdma_context *ctx, uint8_t *buf)
 
 
 
-
 static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_config *cfg)
 {
 	struct ibv_device **dev_list;
 	struct ibv_device *ib_dev = NULL;
 	struct pkt_vm_rdma_context *ctx;
-	// for ud, access_flags == IBV_ACCESS_LOCAL_WRITE; 
-	// for rc, access_flags in this demo will not change. But in rc_pingpong.c will change because of `-O` param
-	int access_flags = IBV_ACCESS_LOCAL_WRITE;		// TODO: REMOTE READ WRITE
 	int idx;
-	int use_new_send = 0;
 	
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
@@ -345,25 +340,18 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 		goto clean_comp_channel;
 	}
 	
-	// ------------------------------------------------
-	// ctx->mr = ibv_reg_mr(ctx->pd, ctx->buf, ctx->buf_size, IBV_ACCESS_LOCAL_WRITE);
-	ctx->mr = ibv_reg_mr(ctx->pd, ctx->buf, cfg->max_msg_size, access_flags);
+	ctx->mr = ibv_reg_mr(ctx->pd, ctx->buf, ctx->buf_size, IBV_ACCESS_LOCAL_WRITE);
 	if (!ctx->mr) {
 		fprintf(stderr, "Couldn't register MR\n");
 		goto clean_pd;
 	}
 	
-	// ------------------------------------------------
-	// ctx->cq = ibv_create_cq(ctx->context, cfg->rx_depth + 1, NULL, ctx->channel, 0);
-	// ctx->cq_s.cq = ibv_create_cq(ctx->context, rx_depth + 1, NULL, ctx->channel, 0);
 	ctx->cq = ibv_create_cq(ctx->context, cfg->rx_depth + 1, NULL, ctx->channel, 0);
 	if (!ctx->cq) {
 		fprintf(stderr, "Couldn't create CQ\n");
 		goto clean_mr;
 	}
 	
-	// ------------------------------------------------
-	// ud_ebpf
 	{
 		struct ibv_qp_attr attr;
 		struct ibv_qp_init_attr init_attr = {
@@ -389,87 +377,20 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 			ctx->send_flags |= IBV_SEND_INLINE;
 		}
 	}
-	// rc_pingpong
-	// {
-	// 	struct ibv_qp_attr attr;
-	// 	struct ibv_qp_init_attr init_attr = {
-	// 		.send_cq = pp_cq(ctx),
-	// 		.recv_cq = pp_cq(ctx),
-	// 		.cap     = {
-	// 			.max_send_wr  = 1,
-	// 			.max_recv_wr  = cfg->rx_depth,
-	// 			.max_send_sge = 1,
-	// 			.max_recv_sge = 1
-	// 		},
-	// 		.qp_type = IBV_QPT_RC
-	// 	};
-
-	// 	if (use_new_send) {
-	// 		struct ibv_qp_init_attr_ex init_attr_ex = {};
-
-	// 		init_attr_ex.send_cq = pp_cq(ctx);
-	// 		init_attr_ex.recv_cq = pp_cq(ctx);
-	// 		init_attr_ex.cap.max_send_wr = 1;
-	// 		init_attr_ex.cap.max_recv_wr = cfg->rx_depth;
-	// 		init_attr_ex.cap.max_send_sge = 1;
-	// 		init_attr_ex.cap.max_recv_sge = 1;
-	// 		init_attr_ex.qp_type = IBV_QPT_RC;
-
-	// 		init_attr_ex.comp_mask |= IBV_QP_INIT_ATTR_PD |
-	// 					  IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
-	// 		init_attr_ex.pd = ctx->pd;
-	// 		init_attr_ex.send_ops_flags = IBV_QP_EX_WITH_SEND;
-
-	// 		ctx->qp = ibv_create_qp_ex(ctx->context, &init_attr_ex);
-	// 	} else {
-	// 		ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
-	// 	}
-
-	// 	if (!ctx->qp)  {
-	// 		fprintf(stderr, "Couldn't create QP\n");
-	// 		goto clean_cq;
-	// 	}
-
-	// 	if (use_new_send)
-	// 		ctx->qpx = ibv_qp_to_qp_ex(ctx->qp);
-
-	// 	ibv_query_qp(ctx->qp, &attr, IBV_QP_CAP, &init_attr);
-	// 	if (init_attr.cap.max_inline_data >= cfg->max_msg_size && !use_dm)
-	// 		ctx->send_flags |= IBV_SEND_INLINE;
-	// }
-
-
-	// --------------------------------
-	// {
-	// 	struct ibv_qp_attr attr = {
-	// 		.qp_state = IBV_QPS_INIT,
-	// 		.pkey_index = 0,
-	// 		.port_num = cfg->ib_port,
-	// 		.qkey = 0x11111111
-	// 	};
-		
-	// 	if (ibv_modify_qp(ctx->qp, &attr,
-	// 				IBV_QP_STATE |
-	// 				IBV_QP_PKEY_INDEX |
-	// 				IBV_QP_PORT |
-	// 				IBV_QP_QKEY)) {
-	// 		fprintf(stderr, "Failed to modify QP to INIT\n");
-	// 		goto clean_qp;
-	// 	}
-	// }
+	
 	{
 		struct ibv_qp_attr attr = {
-			.qp_state        = IBV_QPS_INIT,
-			.pkey_index      = 0,
-			.port_num        = cfg->ib_port,
-			.qp_access_flags = 0
+			.qp_state = IBV_QPS_INIT,
+			.pkey_index = 0,
+			.port_num = cfg->ib_port,
+			.qkey = 0x11111111
 		};
-
+		
 		if (ibv_modify_qp(ctx->qp, &attr,
-				  IBV_QP_STATE              |
-				  IBV_QP_PKEY_INDEX         |
-				  IBV_QP_PORT               |
-				  IBV_QP_ACCESS_FLAGS)) {
+					IBV_QP_STATE |
+					IBV_QP_PKEY_INDEX |
+					IBV_QP_PORT |
+					IBV_QP_QKEY)) {
 			fprintf(stderr, "Failed to modify QP to INIT\n");
 			goto clean_qp;
 		}
@@ -504,6 +425,250 @@ clean_ctx:
 
 	return NULL;
 }
+// static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_config *cfg)
+// {
+// 	struct ibv_device **dev_list;
+// 	struct ibv_device *ib_dev = NULL;
+// 	struct pkt_vm_rdma_context *ctx;
+// 	// for ud, access_flags == IBV_ACCESS_LOCAL_WRITE; 
+// 	// for rc, access_flags in this demo will not change. But in rc_pingpong.c will change because of `-O` param
+// 	int access_flags = IBV_ACCESS_LOCAL_WRITE;		// TODO: REMOTE READ WRITE
+// 	int idx;
+// 	int use_new_send = 0;
+	
+// 	dev_list = ibv_get_device_list(NULL);
+// 	if (!dev_list) {
+// 		perror("Failed to get IB device list");
+// 		return NULL;
+// 	}
+	
+// 	for (idx = 0; dev_list[idx]; idx++) {
+// 		if (!strcmp(ibv_get_device_name(dev_list[idx]), cfg->ib_devname)) {
+// 			ib_dev = dev_list[idx];
+// 			break;
+// 		}
+// 	}
+	
+// 	if (!ib_dev) {
+// 		fprintf(stderr, "IB device %s not found.\n", cfg->ib_devname);
+// 		return NULL;
+// 	}
+	
+// 	ctx = calloc(1, sizeof(*ctx));
+// 	if (!ctx) {
+// 		return NULL;
+// 	}
+	
+// 	memcpy(&ctx->cfg, cfg, sizeof(ctx->cfg));
+// 	ctx->send_flags = IBV_SEND_SIGNALED;
+// 	ctx->rx_depth = cfg->rx_depth;
+// 	ctx->buf_size = 2 * cfg->rx_depth * cfg->max_msg_size;
+// 	ub_list_init(&ctx->dst_addr_list);
+	
+// 	ctx->buf = calloc(1, ctx->buf_size);
+// 	if (!ctx->buf) {
+// 		fprintf(stderr, "Failed to allocate recv buf.\n");
+// 		goto clean_ctx;
+// 	}
+// 	ctx->send_buf = ctx->buf + cfg->rx_depth * cfg->max_msg_size;
+// 	ctx->send_offset = 0;
+
+// 	ctx->context = ibv_open_device(ib_dev);
+// 	if (!ctx->context) {
+// 		fprintf(stderr, "Couldn't get context for %s\n", ibv_get_device_name(ib_dev));
+// 		goto clean_buffer;
+// 	}
+
+// 	{
+// 		struct ibv_port_attr port_info = {};
+// 		int mtu;
+		
+// 		if (ibv_query_port(ctx->context, cfg->ib_port, &port_info)) {
+// 			fprintf(stderr, "Unable to query port info for port %d\n", cfg->ib_port);
+// 			goto clean_device;
+// 		}
+// 		mtu = 1 << (port_info.active_mtu + 7);
+// 		if (cfg->max_msg_size > mtu) {
+// 			fprintf(stderr, "Requested size larger than port MTU (%d)\n", mtu);
+// 			goto clean_device;
+// 		}
+// 	}
+	
+// 	if (cfg->use_event) {
+// 		ctx->channel = ibv_create_comp_channel(ctx->context);
+// 		if (!ctx->channel) {
+// 			fprintf(stderr, "Couldn't create completion channel\n");
+// 			goto clean_device;
+// 		}
+// 	} else {
+// 		ctx->channel = NULL;
+// 	}
+	
+// 	ctx->pd = ibv_alloc_pd(ctx->context);
+// 	if (!ctx->pd) {
+// 		fprintf(stderr, "Couldn't allocate PD\n");
+// 		goto clean_comp_channel;
+// 	}
+	
+// 	// ------------------------------------------------
+// 	// ctx->mr = ibv_reg_mr(ctx->pd, ctx->buf, ctx->buf_size, IBV_ACCESS_LOCAL_WRITE);
+// 	ctx->mr = ibv_reg_mr(ctx->pd, ctx->buf, cfg->max_msg_size, access_flags);
+// 	if (!ctx->mr) {
+// 		fprintf(stderr, "Couldn't register MR\n");
+// 		goto clean_pd;
+// 	}
+	
+// 	// ------------------------------------------------
+// 	// ctx->cq = ibv_create_cq(ctx->context, cfg->rx_depth + 1, NULL, ctx->channel, 0);
+// 	// ctx->cq_s.cq = ibv_create_cq(ctx->context, rx_depth + 1, NULL, ctx->channel, 0);
+// 	ctx->cq = ibv_create_cq(ctx->context, cfg->rx_depth + 1, NULL, ctx->channel, 0);
+// 	if (!ctx->cq) {
+// 		fprintf(stderr, "Couldn't create CQ\n");
+// 		goto clean_mr;
+// 	}
+	
+// 	// ------------------------------------------------
+// 	// ud_ebpf
+// 	{
+// 		struct ibv_qp_attr attr;
+// 		struct ibv_qp_init_attr init_attr = {
+// 			.send_cq = ctx->cq,
+// 			.recv_cq = ctx->cq,
+// 			.cap = {
+// 				.max_send_wr = 1,
+// 				.max_recv_wr = cfg->rx_depth,
+// 				.max_send_sge = 1,
+// 				.max_recv_sge = 1
+// 			},
+// 			.qp_type = IBV_QPT_UD,
+// 		};
+		
+// 		ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
+// 		if (!ctx->qp) {
+// 			fprintf(stderr, "Couldn't create QP\n");
+// 			goto clean_cq;
+// 		}
+		
+// 		ibv_query_qp(ctx->qp, &attr, IBV_QP_CAP, &init_attr);
+// 		if (init_attr.cap.max_inline_data >= cfg->max_msg_size) {
+// 			ctx->send_flags |= IBV_SEND_INLINE;
+// 		}
+// 	}
+// 	// rc_pingpong
+// 	// {
+// 	// 	struct ibv_qp_attr attr;
+// 	// 	struct ibv_qp_init_attr init_attr = {
+// 	// 		.send_cq = pp_cq(ctx),
+// 	// 		.recv_cq = pp_cq(ctx),
+// 	// 		.cap     = {
+// 	// 			.max_send_wr  = 1,
+// 	// 			.max_recv_wr  = cfg->rx_depth,
+// 	// 			.max_send_sge = 1,
+// 	// 			.max_recv_sge = 1
+// 	// 		},
+// 	// 		.qp_type = IBV_QPT_RC
+// 	// 	};
+
+// 	// 	if (use_new_send) {
+// 	// 		struct ibv_qp_init_attr_ex init_attr_ex = {};
+
+// 	// 		init_attr_ex.send_cq = pp_cq(ctx);
+// 	// 		init_attr_ex.recv_cq = pp_cq(ctx);
+// 	// 		init_attr_ex.cap.max_send_wr = 1;
+// 	// 		init_attr_ex.cap.max_recv_wr = cfg->rx_depth;
+// 	// 		init_attr_ex.cap.max_send_sge = 1;
+// 	// 		init_attr_ex.cap.max_recv_sge = 1;
+// 	// 		init_attr_ex.qp_type = IBV_QPT_RC;
+
+// 	// 		init_attr_ex.comp_mask |= IBV_QP_INIT_ATTR_PD |
+// 	// 					  IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+// 	// 		init_attr_ex.pd = ctx->pd;
+// 	// 		init_attr_ex.send_ops_flags = IBV_QP_EX_WITH_SEND;
+
+// 	// 		ctx->qp = ibv_create_qp_ex(ctx->context, &init_attr_ex);
+// 	// 	} else {
+// 	// 		ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
+// 	// 	}
+
+// 	// 	if (!ctx->qp)  {
+// 	// 		fprintf(stderr, "Couldn't create QP\n");
+// 	// 		goto clean_cq;
+// 	// 	}
+
+// 	// 	if (use_new_send)
+// 	// 		ctx->qpx = ibv_qp_to_qp_ex(ctx->qp);
+
+// 	// 	ibv_query_qp(ctx->qp, &attr, IBV_QP_CAP, &init_attr);
+// 	// 	if (init_attr.cap.max_inline_data >= cfg->max_msg_size && !use_dm)
+// 	// 		ctx->send_flags |= IBV_SEND_INLINE;
+// 	// }
+
+
+// 	// --------------------------------
+// 	// {
+// 	// 	struct ibv_qp_attr attr = {
+// 	// 		.qp_state = IBV_QPS_INIT,
+// 	// 		.pkey_index = 0,
+// 	// 		.port_num = cfg->ib_port,
+// 	// 		.qkey = 0x11111111
+// 	// 	};
+		
+// 	// 	if (ibv_modify_qp(ctx->qp, &attr,
+// 	// 				IBV_QP_STATE |
+// 	// 				IBV_QP_PKEY_INDEX |
+// 	// 				IBV_QP_PORT |
+// 	// 				IBV_QP_QKEY)) {
+// 	// 		fprintf(stderr, "Failed to modify QP to INIT\n");
+// 	// 		goto clean_qp;
+// 	// 	}
+// 	// }
+// 	{
+// 		struct ibv_qp_attr attr = {
+// 			.qp_state        = IBV_QPS_INIT,
+// 			.pkey_index      = 0,
+// 			.port_num        = cfg->ib_port,
+// 			.qp_access_flags = 0
+// 		};
+
+// 		if (ibv_modify_qp(ctx->qp, &attr,
+// 				  IBV_QP_STATE              |
+// 				  IBV_QP_PKEY_INDEX         |
+// 				  IBV_QP_PORT               |
+// 				  IBV_QP_ACCESS_FLAGS)) {
+// 			fprintf(stderr, "Failed to modify QP to INIT\n");
+// 			goto clean_qp;
+// 		}
+// 	}
+	
+// 	return ctx;
+
+// clean_qp:
+// 	ibv_destroy_qp(ctx->qp);
+
+// clean_cq:
+// 	ibv_destroy_cq(ctx->cq);
+
+// clean_mr:
+// 	ibv_dereg_mr(ctx->mr);
+
+// clean_pd:
+// 	ibv_dealloc_pd(ctx->pd);
+
+// clean_comp_channel:
+// 	if (ctx->channel)
+// 		ibv_destroy_comp_channel(ctx->channel);
+
+// clean_device:
+// 	ibv_close_device(ctx->context);
+
+// clean_buffer:
+// 	free(ctx->buf);
+
+// clean_ctx:
+// 	free(ctx);
+
+// 	return NULL;
+// }
 
 static int pkt_vm_rdma_get_local_addr(struct pkt_vm_rdma_context *ctx)
 {
