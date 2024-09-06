@@ -269,6 +269,7 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 	// for rc, access_flags in this demo will not change. But in rc_pingpong.c will change because of `-O` param
 	int access_flags = IBV_ACCESS_LOCAL_WRITE;		// TODO: REMOTE READ WRITE
 	int idx;
+	int use_new_send = 0;
 	
 	dev_list = ibv_get_device_list(NULL);
 	if (!dev_list) {
@@ -354,85 +355,88 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 	
 	// ------------------------------------------------
 	// ctx->cq = ibv_create_cq(ctx->context, cfg->rx_depth + 1, NULL, ctx->channel, 0);
-	ctx->cq_s.cq = ibv_create_cq(ctx->context, rx_depth + 1, NULL, ctx->channel, 0);
+	// ctx->cq_s.cq = ibv_create_cq(ctx->context, rx_depth + 1, NULL, ctx->channel, 0);
+	ctx->cq = ibv_create_cq(ctx->context, cfg->rx_depth + 1, NULL, ctx->channel, 0);
 	if (!ctx->cq) {
 		fprintf(stderr, "Couldn't create CQ\n");
 		goto clean_mr;
 	}
 	
 	// ------------------------------------------------
-	// {
-	// 	struct ibv_qp_attr attr;
-	// 	struct ibv_qp_init_attr init_attr = {
-	// 		.send_cq = ctx->cq,
-	// 		.recv_cq = ctx->cq,
-	// 		.cap = {
-	// 			.max_send_wr = 1,
-	// 			.max_recv_wr = cfg->rx_depth,
-	// 			.max_send_sge = 1,
-	// 			.max_recv_sge = 1
-	// 		},
-	// 		.qp_type = IBV_QPT_UD,
-	// 	};
-		
-	// 	ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
-	// 	if (!ctx->qp) {
-	// 		fprintf(stderr, "Couldn't create QP\n");
-	// 		goto clean_cq;
-	// 	}
-		
-	// 	ibv_query_qp(ctx->qp, &attr, IBV_QP_CAP, &init_attr);
-	// 	if (init_attr.cap.max_inline_data >= cfg->max_msg_size) {
-	// 		ctx->send_flags |= IBV_SEND_INLINE;
-	// 	}
-	// }
+	// ud_ebpf
 	{
 		struct ibv_qp_attr attr;
 		struct ibv_qp_init_attr init_attr = {
-			.send_cq = pp_cq(ctx),
-			.recv_cq = pp_cq(ctx),
-			.cap     = {
-				.max_send_wr  = 1,
-				.max_recv_wr  = cfg->rx_depth,
+			.send_cq = ctx->cq,
+			.recv_cq = ctx->cq,
+			.cap = {
+				.max_send_wr = 1,
+				.max_recv_wr = cfg->rx_depth,
 				.max_send_sge = 1,
 				.max_recv_sge = 1
 			},
-			.qp_type = IBV_QPT_RC
+			.qp_type = IBV_QPT_UD,
 		};
-
-		if (use_new_send) {
-			struct ibv_qp_init_attr_ex init_attr_ex = {};
-
-			init_attr_ex.send_cq = pp_cq(ctx);
-			init_attr_ex.recv_cq = pp_cq(ctx);
-			init_attr_ex.cap.max_send_wr = 1;
-			init_attr_ex.cap.max_recv_wr = rx_depth;
-			init_attr_ex.cap.max_send_sge = 1;
-			init_attr_ex.cap.max_recv_sge = 1;
-			init_attr_ex.qp_type = IBV_QPT_RC;
-
-			init_attr_ex.comp_mask |= IBV_QP_INIT_ATTR_PD |
-						  IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
-			init_attr_ex.pd = ctx->pd;
-			init_attr_ex.send_ops_flags = IBV_QP_EX_WITH_SEND;
-
-			ctx->qp = ibv_create_qp_ex(ctx->context, &init_attr_ex);
-		} else {
-			ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
-		}
-
-		if (!ctx->qp)  {
+		
+		ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
+		if (!ctx->qp) {
 			fprintf(stderr, "Couldn't create QP\n");
 			goto clean_cq;
 		}
-
-		if (use_new_send)
-			ctx->qpx = ibv_qp_to_qp_ex(ctx->qp);
-
+		
 		ibv_query_qp(ctx->qp, &attr, IBV_QP_CAP, &init_attr);
-		if (init_attr.cap.max_inline_data >= cfg->max_msg_size && !use_dm)
+		if (init_attr.cap.max_inline_data >= cfg->max_msg_size) {
 			ctx->send_flags |= IBV_SEND_INLINE;
+		}
 	}
+	// rc_pingpong
+	// {
+	// 	struct ibv_qp_attr attr;
+	// 	struct ibv_qp_init_attr init_attr = {
+	// 		.send_cq = pp_cq(ctx),
+	// 		.recv_cq = pp_cq(ctx),
+	// 		.cap     = {
+	// 			.max_send_wr  = 1,
+	// 			.max_recv_wr  = cfg->rx_depth,
+	// 			.max_send_sge = 1,
+	// 			.max_recv_sge = 1
+	// 		},
+	// 		.qp_type = IBV_QPT_RC
+	// 	};
+
+	// 	if (use_new_send) {
+	// 		struct ibv_qp_init_attr_ex init_attr_ex = {};
+
+	// 		init_attr_ex.send_cq = pp_cq(ctx);
+	// 		init_attr_ex.recv_cq = pp_cq(ctx);
+	// 		init_attr_ex.cap.max_send_wr = 1;
+	// 		init_attr_ex.cap.max_recv_wr = cfg->rx_depth;
+	// 		init_attr_ex.cap.max_send_sge = 1;
+	// 		init_attr_ex.cap.max_recv_sge = 1;
+	// 		init_attr_ex.qp_type = IBV_QPT_RC;
+
+	// 		init_attr_ex.comp_mask |= IBV_QP_INIT_ATTR_PD |
+	// 					  IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+	// 		init_attr_ex.pd = ctx->pd;
+	// 		init_attr_ex.send_ops_flags = IBV_QP_EX_WITH_SEND;
+
+	// 		ctx->qp = ibv_create_qp_ex(ctx->context, &init_attr_ex);
+	// 	} else {
+	// 		ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
+	// 	}
+
+	// 	if (!ctx->qp)  {
+	// 		fprintf(stderr, "Couldn't create QP\n");
+	// 		goto clean_cq;
+	// 	}
+
+	// 	if (use_new_send)
+	// 		ctx->qpx = ibv_qp_to_qp_ex(ctx->qp);
+
+	// 	ibv_query_qp(ctx->qp, &attr, IBV_QP_CAP, &init_attr);
+	// 	if (init_attr.cap.max_inline_data >= cfg->max_msg_size && !use_dm)
+	// 		ctx->send_flags |= IBV_SEND_INLINE;
+	// }
 
 
 	// --------------------------------
