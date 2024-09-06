@@ -37,7 +37,7 @@ static void usage(void)
 	printf("  -g, --gid-idx=<gid index>         local port gid index\n");
 	printf("  -f, --ebpf-program=<vm file>      path to ebpf program\n");
 	printf("  -t, --test-case=<test case index> test case index\n");
-	printf("  -c, --client                      act as client\n");
+	printf("  -c, --is-server                   act as server\n");
 }
 
 static int parse_config(struct vm_test_config *test_cfg,
@@ -54,7 +54,7 @@ static int parse_config(struct vm_test_config *test_cfg,
 		{.name = "msg-size",     .has_arg = 1, .val = 's'},
 		{.name = "rx-depth",     .has_arg = 1, .val = 'r'},
 		{.name = "gid-idx",      .has_arg = 1, .val = 'g'},
-		{.name = "client",       .has_arg = 0, .val = 'c'},
+		{.name = "server",       .has_arg = 1, .val = 'c'},
 	};
 	struct rdma_transport_config *rdma_cfg = &executor_cfg->transport.rdma_cfg;
 	
@@ -110,7 +110,7 @@ static int parse_config(struct vm_test_config *test_cfg,
 			break;
 			
 		case 'c':
-			test_cfg->act_as_client = 1;
+			rdma_cfg->is_server = 1;
 			break;
 		}
 	}

@@ -23,6 +23,7 @@ struct rdma_transport_config {
 	unsigned int rx_depth;
 	int use_event;
 	int gid_index;
+	int is_server; // 1: server, 0: client
 };
 
 struct udp_transport_config {
