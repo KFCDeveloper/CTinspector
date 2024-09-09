@@ -115,7 +115,7 @@ static int pkt_vm_rdma_enable_qp_rc(struct pkt_vm_rdma_context *ctx,struct rdma_
 {
 	struct ibv_qp_attr attr = {
 		.qp_state		= IBV_QPS_RTR,
-		.path_mtu		= IBV_MTU_1024,
+		.path_mtu		= IBV_MTU_4096,
 		.dest_qp_num	= des->qpn,
 		.rq_psn			= des->psn,
 		.max_dest_rd_atomic	= 1,
@@ -171,6 +171,7 @@ static int pkt_vm_rdma_enable_qp_rc(struct pkt_vm_rdma_context *ctx,struct rdma_
 		fprintf(stderr, "Failed to modify QP to RTS\n");
 		return 1;
 	}
+	if_receive = 1;
 	return 0;
 }
 
@@ -336,7 +337,11 @@ static void *pkt_vm_rdma_server_main(void *arg)
 		// 		perror("Couldn't Modify QP state");
 		// }
 		// after socket transfer, enable QP
-		pkt_vm_rdma_enable_qp_rc(ctx, dst_info);  // 传入修改qp需要的信息，来自于msg
+		if (if_receive==0){
+			pkt_vm_rdma_enable_qp_rc(ctx, dst_info);  // 传入修改qp需要的信息，来自于msg
+		}
+		
+		
 
 		n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
 					ctx->local_addr.qpn, ctx->local_addr.psn);
@@ -347,10 +352,8 @@ static void *pkt_vm_rdma_server_main(void *arg)
 			read(connfd, msg, sizeof(msg)) != sizeof("done")) {
 			perror("Couldn't rea/write remote address");
 		}
-		
 		close(connfd);
 	}
-	
 	close(sockfd);
 }
 
@@ -827,7 +830,9 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 	if (dst == NULL) {
 		dst = pkt_vm_rdma_get_node_info(ctx, n);	// socket 发送端 (client)
 		// 得到了对端的信息，modify qp
-		pkt_vm_rdma_enable_qp_rc(ctx, &dst->info);
+		if (if_receive==0){
+			pkt_vm_rdma_enable_qp_rc(ctx, &dst->info);
+		}
 		if (dst == NULL) {
 			perror("Failed to get destination information");
 			return 0;
@@ -847,9 +852,9 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 	wr.num_sge = 1;
 	wr.opcode = IBV_WR_SEND;
 	wr.send_flags = ctx->send_flags;
-	wr.wr.ud.ah = dst->ah;
-	wr.wr.ud.remote_qpn = dst->info.qpn;
-	wr.wr.ud.remote_qkey = 0x11111111;
+	// wr.wr.ud.ah = dst->ah;
+	// wr.wr.ud.remote_qpn = dst->info.qpn;
+	// wr.wr.ud.remote_qkey = 0x11111111;
 	
 	if (ibv_post_send(ctx->qp, &wr, &bad_wr) == 0) {
 		ctx->send_offset = (ctx->send_offset + ctx->cfg.max_msg_size) % (ctx->cfg.max_msg_size * ctx->cfg.rx_depth);
@@ -881,8 +886,8 @@ int pkt_vm_rdma_recv(void *info, struct transport_message *msg)
 		return 0;
 	}
 	
-	msg->buf = (void *)((char *)wc.wr_id + UD_GRH_SIZE);
-	msg->buf_size = wc.byte_len - UD_GRH_SIZE;
+	msg->buf = (void *)((char *)wc.wr_id);
+	msg->buf_size = wc.byte_len;
 	
 	return msg->buf_size;
 }

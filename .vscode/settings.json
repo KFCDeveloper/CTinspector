@@ -1,0 +1,5 @@
+{
+    "files.associations": {
+        "ebpf_vm_transport.h": "c"
+    }
+}
