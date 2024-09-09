@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <infiniband/verbs.h>
+#include <errno.h>
 
 #include "ub_list.h"
 #include "ebpf_vm_transport_rdma_rc.h"
@@ -19,6 +20,10 @@ static int use_dm; // `use_dm` 通常是指是否使用了设备内存（Device 
 
 // var in rc_pingpong.c main func
 unsigned int size = 4096;
+
+// whether receive socket msg;
+static int if_receive = 0;
+
 void wire_gid_to_gid(const uint8_t *wgid, union ibv_gid *gid)
 {
 	uint8_t tmp[9];
@@ -106,6 +111,166 @@ static struct rdma_addr_info *pkt_vm_rdma_add_dest(struct pkt_vm_rdma_context *c
 	return dst;
 }
 
+static int pkt_vm_rdma_enable_qp_rc(struct pkt_vm_rdma_context *ctx,struct rdma_addr_message *des)
+{
+	struct ibv_qp_attr attr = {
+		.qp_state		= IBV_QPS_RTR,
+		.path_mtu		= IBV_MTU_1024,
+		.dest_qp_num	= des->qpn,
+		.rq_psn			= des->psn,
+		.max_dest_rd_atomic	= 1,
+		.min_rnr_timer		= 12,
+		.ah_attr		= {
+			.is_global	= 0,
+			.dlid		= des->lid,
+			.sl		= 0,
+			.src_path_bits	= 0,
+			.port_num	= ctx->cfg.ib_port
+		}
+	};
+
+	if (des->lid== 0) {
+		printf("using gid\n");
+		attr.ah_attr.is_global = 1;
+		attr.ah_attr.grh.hop_limit = 1;
+		attr.ah_attr.grh.dgid = des->gid;
+		attr.ah_attr.grh.sgid_index = ctx->cfg.gid_index;
+	}
+
+	if (ibv_modify_qp(ctx->qp, &attr,
+			  IBV_QP_STATE              |
+			  IBV_QP_AV                 |
+			  IBV_QP_PATH_MTU           |
+			  IBV_QP_DEST_QPN           |
+			  IBV_QP_RQ_PSN             |
+			  IBV_QP_MAX_DEST_RD_ATOMIC |
+			  IBV_QP_MIN_RNR_TIMER)) {
+			fprintf(stderr, "Failed to modify QP to RTR RC\n");
+			return 1;
+	}
+	
+	attr.qp_state = IBV_QPS_RTS;
+	attr.timeout	    = 14;
+	attr.retry_cnt	    = 7;
+	attr.rnr_retry	    = 7;
+	//attr.sq_psn	    = my_psn;
+	attr.max_rd_atomic  = 1;
+	attr.sq_psn = ctx->local_addr.psn;
+	
+	// if (ibv_modify_qp(ctx->qp, &attr, IBV_QP_STATE | IBV_QP_SQ_PSN)) {
+	// 		fprintf(stderr, "Failed to modify QP to RTS RC\n");
+	// 		return 1;
+	// }
+	if (ibv_modify_qp(ctx->qp, &attr,
+			  IBV_QP_STATE              |
+			  IBV_QP_TIMEOUT            |
+			  IBV_QP_RETRY_CNT          |
+			  IBV_QP_RNR_RETRY          |
+			  IBV_QP_SQ_PSN             |
+			  IBV_QP_MAX_QP_RD_ATOMIC)) {
+		fprintf(stderr, "Failed to modify QP to RTS\n");
+		return 1;
+	}
+	return 0;
+}
+
+
+
+// server receive client's socket info; and server send its info back to client
+// static struct rdma_addr_info *server_send_back_node_info(struct pkt_vm_rdma_context *ctx, struct node_url *server_url){
+// 	uint8_t msg[sizeof(EXCH_MSG_PATTERN)];
+// 	struct sockaddr_in name = {0};
+// 	int sockfd, n;
+	
+// 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+// 	if (sockfd < 0) {
+// 		perror("Failed to create socket");
+// 		return NULL;
+// 	}
+	
+// 	name.sin_family = AF_INET;
+// 	name.sin_port = server_url->port;
+// 	name.sin_addr.s_addr = server_url->ip;
+	
+// 	if (connect(sockfd, (struct sockaddr *)&name, sizeof(name)) < 0) {
+// 		char svr[32];
+// 		inet_ntop(AF_INET, &name.sin_addr.s_addr, svr, sizeof(svr));
+// 		printf("server = %s, port = %d\n", svr, ntohs(name.sin_port));
+		
+// 		perror("Failed to connect to server");
+// 		close(sockfd);
+// 		return NULL;
+// 	}
+	
+// 	n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
+// 				ctx->local_addr.qpn, ctx->local_addr.psn);
+// 	gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
+	
+// 	if (write(sockfd, msg, sizeof(msg)) != sizeof(msg)) {
+// 		perror("Couldn't send local address");
+// 		close(sockfd);
+// 		return NULL;
+// 	}
+	
+// 	if (read(sockfd, msg, sizeof(msg)) != sizeof(msg) ||
+// 		write(sockfd, "done", sizeof("done")) != sizeof("done")) {
+// 		perror("Couldn't rea/write remote address");
+// 		close(sockfd);
+// 		return NULL;
+// 	}
+	
+// 	close(sockfd);
+// 	return;
+// }
+
+static struct rdma_addr_info *pkt_vm_rdma_get_node_info(struct pkt_vm_rdma_context *ctx, struct node_url *server_url)
+{
+	uint8_t msg[sizeof(EXCH_MSG_PATTERN)];
+	struct sockaddr_in name = {0};
+	int sockfd, n;
+	
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd < 0) {
+		perror("Failed to create socket");
+		return NULL;
+	}
+	
+	name.sin_family = AF_INET;
+	name.sin_port = server_url->port;
+	name.sin_addr.s_addr = server_url->ip;
+	
+	if (connect(sockfd, (struct sockaddr *)&name, sizeof(name)) < 0) {
+		char svr[32];
+		inet_ntop(AF_INET, &name.sin_addr.s_addr, svr, sizeof(svr));
+		printf("server = %s, port = %d\n", svr, ntohs(name.sin_port));
+		
+		perror("Failed to connect to server");
+		close(sockfd);
+		return NULL;
+	}
+	
+	n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
+				ctx->local_addr.qpn, ctx->local_addr.psn);
+	gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
+	
+	if (write(sockfd, msg, sizeof(msg)) != sizeof(msg)) {
+		perror("Couldn't send local address");
+		close(sockfd);
+		return NULL;
+	}
+	
+	// 上面先write了自己msg，然后这里先read到对端msg，然后再发送一个done到对端 对端会结束socket
+	if (read(sockfd, msg, sizeof(msg)) != sizeof(msg) ||
+		write(sockfd, "done", sizeof("done")) != sizeof("done")) {
+		perror("Couldn't rea/write remote address");
+		close(sockfd);
+		return NULL;
+	}
+	
+	close(sockfd);
+	return pkt_vm_rdma_add_dest(ctx, server_url, msg);
+}
+
 static void *pkt_vm_rdma_server_main(void *arg)
 {
 	struct pkt_vm_rdma_context *ctx = arg;
@@ -156,10 +321,28 @@ static void *pkt_vm_rdma_server_main(void *arg)
 			continue;
 		}
 		
+		// msg to rdma_addr_message
+		uint8_t gid_str[GID_STR_SIZE];
+		struct rdma_addr_message * dst_info;
+		dst_info = (struct rdma_addr_message *)malloc(sizeof(struct rdma_addr_message));
+		sscanf(msg, "%04x:%06x:%06x:%s", &dst_info->lid, &dst_info->qpn, &dst_info->psn, gid_str);
+		wire_gid_to_gid(gid_str, &dst_info->gid);
+		
+		printf("run pkt_vm_rdma_enable_qp in pkt_vm_rdma_server_main!\n");
+			// Modify QP state from INIT to RTS using client's QP information
+		// if (pkt_vm_rdma_enable_qp(ctx, &dst_info) == 0) {
+		// 		// Ready for data communication
+		// } else {
+		// 		perror("Couldn't Modify QP state");
+		// }
+		// after socket transfer, enable QP
+		pkt_vm_rdma_enable_qp_rc(ctx, dst_info);  // 传入修改qp需要的信息，来自于msg
+
 		n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
 					ctx->local_addr.qpn, ctx->local_addr.psn);
 		gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
-	
+		
+		// 这里是先write，再read；防止read的msg覆盖了write的msg
 		if (write(connfd, msg, sizeof(msg)) != sizeof(msg) ||
 			read(connfd, msg, sizeof(msg)) != sizeof("done")) {
 			perror("Couldn't rea/write remote address");
@@ -169,75 +352,6 @@ static void *pkt_vm_rdma_server_main(void *arg)
 	}
 	
 	close(sockfd);
-}
-
-static struct rdma_addr_info *pkt_vm_rdma_get_node_info(struct pkt_vm_rdma_context *ctx, struct node_url *server_url)
-{
-	uint8_t msg[sizeof(EXCH_MSG_PATTERN)];
-	struct sockaddr_in name = {0};
-	int sockfd, n;
-	
-	sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (sockfd < 0) {
-		perror("Failed to create socket");
-		return NULL;
-	}
-	
-	name.sin_family = AF_INET;
-	name.sin_port = server_url->port;
-	name.sin_addr.s_addr = server_url->ip;
-	
-	if (connect(sockfd, (struct sockaddr *)&name, sizeof(name)) < 0) {
-		char svr[32];
-		inet_ntop(AF_INET, &name.sin_addr.s_addr, svr, sizeof(svr));
-		printf("server = %s, port = %d\n", svr, ntohs(name.sin_port));
-		
-		perror("Failed to connect to server");
-		close(sockfd);
-		return NULL;
-	}
-	
-	n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
-				ctx->local_addr.qpn, ctx->local_addr.psn);
-	gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
-	
-	if (write(sockfd, msg, sizeof(msg)) != sizeof(msg)) {
-		perror("Couldn't send local address");
-		close(sockfd);
-		return NULL;
-	}
-	
-	if (read(sockfd, msg, sizeof(msg)) != sizeof(msg) ||
-		write(sockfd, "done", sizeof("done")) != sizeof("done")) {
-		perror("Couldn't rea/write remote address");
-		close(sockfd);
-		return NULL;
-	}
-	
-	close(sockfd);
-	return pkt_vm_rdma_add_dest(ctx, server_url, msg);
-}
-
-static int pkt_vm_rdma_enable_qp(struct pkt_vm_rdma_context *ctx)
-{
-	struct ibv_qp_attr attr = {
-			.qp_state = IBV_QPS_RTR
-	};
-	
-	if (ibv_modify_qp(ctx->qp, &attr, IBV_QP_STATE)) {
-			fprintf(stderr, "Failed to modify QP to RTR\n");
-			return 1;
-	}
-	
-	attr.qp_state = IBV_QPS_RTS;
-	attr.sq_psn = ctx->local_addr.psn;
-	
-	if (ibv_modify_qp(ctx->qp, &attr, IBV_QP_STATE | IBV_QP_SQ_PSN)) {
-			fprintf(stderr, "Failed to modify QP to RTS\n");
-			return 1;
-	}
-	
-	return 0;
 }
 
 static int pkt_vm_rdma_post_recv(struct pkt_vm_rdma_context *ctx, uint8_t *buf)
@@ -363,7 +477,7 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 				.max_send_sge = 1,
 				.max_recv_sge = 1
 			},
-			.qp_type = IBV_QPT_UD,
+			.qp_type = IBV_QPT_RC,
 		};
 		
 		ctx->qp = ibv_create_qp(ctx->pd, &init_attr);
@@ -380,17 +494,17 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 	
 	{
 		struct ibv_qp_attr attr = {
-			.qp_state = IBV_QPS_INIT,
-			.pkey_index = 0,
-			.port_num = cfg->ib_port,
-			.qkey = 0x11111111
+			.qp_state        = IBV_QPS_INIT,
+			.pkey_index      = 0,
+			.port_num        = cfg->ib_port,
+			.qp_access_flags = 0
 		};
-		
+
 		if (ibv_modify_qp(ctx->qp, &attr,
-					IBV_QP_STATE |
-					IBV_QP_PKEY_INDEX |
-					IBV_QP_PORT |
-					IBV_QP_QKEY)) {
+				  IBV_QP_STATE              |
+				  IBV_QP_PKEY_INDEX         |
+				  IBV_QP_PORT               |
+				  IBV_QP_ACCESS_FLAGS)) {
 			fprintf(stderr, "Failed to modify QP to INIT\n");
 			goto clean_qp;
 		}
@@ -711,12 +825,16 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 	}
 	
 	if (dst == NULL) {
-		dst = pkt_vm_rdma_get_node_info(ctx, n);
+		dst = pkt_vm_rdma_get_node_info(ctx, n);	// socket 发送端 (client)
+		// 得到了对端的信息，modify qp
+		pkt_vm_rdma_enable_qp_rc(ctx, &dst->info);
 		if (dst == NULL) {
 			perror("Failed to get destination information");
 			return 0;
 		}
 	}
+	// // 等待对端socket发送信息，然后利用信息修改 qp 
+	// while (!if_receive);
 	
 	memcpy(ctx->send_buf + ctx->send_offset, msg->buf, msg->buf_size);
 	
@@ -852,14 +970,15 @@ static void *pkt_vm_rdma_init(struct transport_config *cfg)
 	
 	pkt_vm_rdma_get_local_addr(ctx);
 	
-	ret = pthread_create(&ctx->server_thread, NULL, pkt_vm_rdma_server_main, ctx);
+	ret = pthread_create(&ctx->server_thread, NULL, pkt_vm_rdma_server_main, ctx);	// 每个机子都自身为服务器 (server)
+
 	if (ret != 0) {
 		perror("Failed to create server thread");
 		pkt_vm_rdma_exit(ctx);
 		return NULL;
 	}
 	
-	pkt_vm_rdma_enable_qp(ctx);
+	// pkt_vm_rdma_enable_qp(ctx);
 	return ctx;
 }
 

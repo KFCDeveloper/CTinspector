@@ -491,6 +491,11 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 
 int pkt_vm_rdma_recv(void *info, struct transport_message *msg)
 {
+	// // send socket to client
+	// // server_send_back_node_info(ctx, );
+	// struct node_url *nu;
+	// pkt_vm_rdma_get_node_info(ctx, nu);
+	// if_receive = 1; // have modified qp
 	struct pkt_vm_rdma_context *ctx = info;
 	struct ibv_wc wc;
 	
@@ -513,7 +518,6 @@ int pkt_vm_rdma_recv(void *info, struct transport_message *msg)
 	
 	msg->buf = (void *)((char *)wc.wr_id + UD_GRH_SIZE);
 	msg->buf_size = wc.byte_len - UD_GRH_SIZE;
-	
 	return msg->buf_size;
 }
 
