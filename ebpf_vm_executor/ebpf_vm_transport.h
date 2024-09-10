@@ -54,4 +54,11 @@ struct transport_ops {
 
 int register_transport(struct transport_ops *ops);
 
+// 用来配合rdma write的自定义协议 地址表
+struct rc_write_table{
+	uint64_t write_start_addr;	// 从什么内存的什么位置开始写的
+	uint32_t current_bl_index;	// 当前正在写的block的index
+	uint16_t offset;	// 当前block数据的offset
+};
+
 #endif

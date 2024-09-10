@@ -200,7 +200,8 @@ int main(int argc, char **argv)
         add_vm(executor, vm);
     }
 
-	vm_executor_run(executor);
+	// vm_executor_run(executor);
+	vm_executor_run_wr_rec(executor);
 
 	//test_transport(executor, test_cfg.act_as_client);
 

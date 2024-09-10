@@ -214,6 +214,7 @@ int add_vm(struct ebpf_vm_executor *executor, struct ebpf_vm *vm);
 int load_data(struct ebpf_vm *vm, uint8_t *data, uint32_t len);
 void destroy_vm(struct ebpf_vm *vm);
 void vm_executor_run(struct ebpf_vm_executor *executor);
+void vm_executor_run_wr_rec(struct ebpf_vm_executor *executor);
 uint64_t run_ebpf_vm(struct ebpf_vm *vm);
 void update_vm_state(struct ebpf_vm *vm, int state);
 uint64_t vm_mmu(uint64_t va, struct ebpf_vm *vm);

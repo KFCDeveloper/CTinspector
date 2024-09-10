@@ -471,6 +471,37 @@ void vm_executor_run(struct ebpf_vm_executor *executor)
 	}
 }
 
+// 使用 rdma write的vm_executor_run
+void vm_executor_run_wr_rec(struct ebpf_vm_executor *executor)
+{
+	struct ebpf_vm *vm = NULL, *tmp = NULL;
+	struct transport_message recv_msg;
+	int msg_len;
+	
+	while (executor->state.should_stop == 0) {
+		UB_LIST_FOR_EACH_SAFE(vm, tmp, rd.list, &executor->vm_list) {
+			if (vm->state.vm_state == VM_STATE_RUNNING ||
+				vm->state.vm_state == VM_STATE_WAIT_FOR_ADDRESS) {
+					run_ebpf_vm(vm);
+			}
+			
+			if (vm->state.vm_state == VM_STATE_EXIT) {
+				ub_list_remove(&vm->rd.list);
+				destroy_vm(vm);
+			}
+		}
+		
+		// msg_len = executor->transport->recv(executor->transport_ctx, &recv_msg);
+		uint32_t imme = executor->transport->recv(executor->transport_ctx, &recv_msg);
+		// 处理write过来的信息，在socket会交换起始的地址指针，此处32位 {block index(22 bits), offset(10 bits)}，一个block 1KB
+		
+		if (msg_len != 0) {
+			receive_vm(executor, recv_msg.buf, recv_msg.buf_size);
+			executor->transport->return_buf(executor->transport_ctx, &recv_msg);
+		}
+	}
+}
+
 int add_vm(struct ebpf_vm_executor *executor, struct ebpf_vm *vm)
 {
 	vm->rd.id = executor->next_vm_id++;
