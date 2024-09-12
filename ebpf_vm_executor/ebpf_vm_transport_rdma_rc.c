@@ -101,24 +101,29 @@ static struct rdma_addr_info *pkt_vm_rdma_add_dest(struct pkt_vm_rdma_context *c
 	dst->key.reserved = 0;
 	
 	// sscanf(msg, "%x:%x:%x:%s", &dst->info.lid, &dst->info.qpn, &dst->info.psn, gid_str);
-	sscanf(msg, "%04x:%06x:%06x:%016llx:%08x:%s", &dst->info.lid, &dst->info.qpn, &dst->info.psn, &dst->info.mr_addr, &dst->info.remote_key, gid_str);
+	sscanf(msg, "%04x:%06x:%06x:%016lx:%08x:%s", &dst->info.lid, &dst->info.qpn, &dst->info.psn, &dst->info.mr_addr, &dst->info.remote_key, gid_str);
 	wire_gid_to_gid(gid_str, &dst->info.gid);
 	// 如果一个rkey从未出现过，则创建一个 start_t_entry
-	struct start_t_entry *result = find_entry(ctx->start_table, 10, &dst->info.remote_key);
-	if (result != NULL) {
-	printf("Found entry: rkey = %u, r_mr_start = %llu, r_mr_curr_total = %llu\n",
-			result->rkey, result->r_mr_start, result->r_mr_curr_total);
-	} else {
-		printf("No matching entry found. Create an entry\n");
-		for (int i = 0; i < size; i++) {
-			if (ctx->start_table[i].rkey == 0) {  // 发现未使用的条目
-				ctx->start_table[i].rkey = result->rkey;
-				ctx->start_table[i].r_mr_start = result->r_mr_start;
-				ctx->start_table[i].r_mr_curr_total = result->r_mr_curr_total;
-				return 1; // 插入成功
-			}
-		}
-	}
+	// struct start_t_entry *result = find_entry(ctx->start_table, 10, dst->info.remote_key);
+	// if (result != NULL) {
+	// printf("Found entry: rkey = %u, r_mr_start = %lu, r_mr_curr_total = %lu\n",
+	// 		result->rkey, result->r_mr_start, result->r_mr_curr_total);
+	// } else {
+	// 	printf("No matching entry found. Create an entry\n");
+	// 	for (int i = 0; i < size; i++) {
+	// 		if (ctx->start_table[i].rkey == 0) {  // 发现未使用的条目
+	// 			ctx->start_table[i].rkey = dst->info.remote_key;
+	// 			ctx->start_table[i].r_mr_start = dst->info.mr_addr;
+	// 			ctx->start_table[i].r_mr_curr_total = 0;
+	// 			break;
+	// 		}else{
+	// 			if (i == size - 1){
+	// 				fprintf(stderr, "No space in start_table\n");
+	// 			}
+	// 			continue;
+	// 		}
+	// 	}
+	// }
 	
 	if (dst->info.gid.global.interface_id) {
 		ah_attr.is_global = 1;
@@ -177,7 +182,7 @@ static int pkt_vm_rdma_enable_qp_rc(struct pkt_vm_rdma_context *ctx,struct rdma_
 			fprintf(stderr, "Failed to modify QP to RTR RC\n");
 			return 1;
 	}
-	
+	printf("success to modify QP RTR\n");
 	attr.qp_state = IBV_QPS_RTS;
 	attr.timeout	    = 14;
 	attr.retry_cnt	    = 7;
@@ -201,6 +206,7 @@ static int pkt_vm_rdma_enable_qp_rc(struct pkt_vm_rdma_context *ctx,struct rdma_
 		return 1;
 	}
 	if_receive = 1;
+	printf("success to modify QP RTS\n");
 	return 0;
 }
 
@@ -281,7 +287,7 @@ static struct rdma_addr_info *pkt_vm_rdma_write_get_node_info(struct pkt_vm_rdma
 	
 	// n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
 	// 			ctx->local_addr.qpn, ctx->local_addr.psn, (uint64_t)ctx->mr->addr, ctx->mr->rkey);
-	n = sprintf(msg, "%04x:%06x:%06x:%016llx:%08x", ctx->local_addr.lid,
+	n = sprintf(msg, "%04x:%06x:%06x:%016lx:%08x:", ctx->local_addr.lid,
             	ctx->local_addr.qpn, ctx->local_addr.psn, (uint64_t)ctx->mr->addr, ctx->mr->rkey);
 	gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
 	
@@ -357,24 +363,29 @@ static void *pkt_vm_rdma_server_main(void *arg)
 		uint8_t gid_str[GID_STR_SIZE];
 		struct rdma_addr_message * dst_info;
 		dst_info = (struct rdma_addr_message *)malloc(sizeof(struct rdma_addr_message));
-		sscanf(msg, "%04x:%06x:%06x:%016llx:%08x:%s", &dst_info->lid, &dst_info->qpn, &dst_info->psn, &dst_info->mr_addr, &dst_info->remote_key, gid_str);
+		sscanf(msg, "%04x:%06x:%06x:%016lx:%08x:%s", &dst_info->lid, &dst_info->qpn, &dst_info->psn, &dst_info->mr_addr, &dst_info->remote_key, gid_str);
 		wire_gid_to_gid(gid_str, &dst_info->gid);
 		// 如果一个rkey从未出现过，则创建一个 start_t_entry
-    	struct start_t_entry *result = find_entry(ctx->start_table, 10, &dst_info->remote_key);
-		if (result != NULL) {
-        printf("Found entry: rkey = %u, r_mr_start = %llu, r_mr_curr_total = %llu\n",
-               result->rkey, result->r_mr_start, result->r_mr_curr_total);
-		} else {
-			printf("No matching entry found. Create an entry\n");
-			for (int i = 0; i < size; i++) {
-				if (ctx->start_table[i].rkey == 0) {  // 发现未使用的条目
-					ctx->start_table[i].rkey = result->rkey;
-					ctx->start_table[i].r_mr_start = result->r_mr_start;
-					ctx->start_table[i].r_mr_curr_total = result->r_mr_curr_total;
-					return 1; // 插入成功
-				}
-    		}
-		}
+    	// struct start_t_entry *result = find_entry(ctx->start_table, 10, dst_info->remote_key);
+		// if (result != NULL) {
+		// printf("Found entry: rkey = %u, r_mr_start = %lu, r_mr_curr_total = %lu\n",
+		// 		result->rkey, result->r_mr_start, result->r_mr_curr_total);
+		// } else {
+		// 	printf("No matching entry found. Create an entry\n");
+		// 	for (int i = 0; i < size; i++) {
+		// 		if (ctx->start_table[i].rkey == 0) {  // 发现未使用的条目
+		// 			ctx->start_table[i].rkey = dst_info->remote_key;
+		// 			ctx->start_table[i].r_mr_start = dst_info->mr_addr;
+		// 			ctx->start_table[i].r_mr_curr_total = 0;
+		// 			break;
+		// 		}else{
+		// 			if (i == size - 1){
+		// 				fprintf(stderr, "No space in start_table\n");
+		// 			}
+		// 			continue;
+		// 		}
+		// 	}
+		// }
 
 		printf("run pkt_vm_rdma_enable_qp in pkt_vm_rdma_server_main!\n");
 			// Modify QP state from INIT to RTS using client's QP information
@@ -392,7 +403,7 @@ static void *pkt_vm_rdma_server_main(void *arg)
 
 		// n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
 					// ctx->local_addr.qpn, ctx->local_addr.psn);
-		n = sprintf(msg, "%04x:%06x:%06x:%016llx:%08x", ctx->local_addr.lid,
+		n = sprintf(msg, "%04x:%06x:%06x:%016lx:%08x:", ctx->local_addr.lid,
 			ctx->local_addr.qpn, ctx->local_addr.psn, (uint64_t)ctx->mr->addr, ctx->mr->rkey);
 		gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
 		
@@ -451,6 +462,8 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 	}
 	
 	ctx = calloc(1, sizeof(*ctx));
+	memset(ctx->start_table, 0, sizeof(ctx->start_table));
+	memset(ctx->writen_table, 0, sizeof(ctx->writen_table));
 	if (!ctx) {
 		return NULL;
 	}
@@ -549,7 +562,7 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 			.qp_state        = IBV_QPS_INIT,
 			.pkey_index      = 0,
 			.port_num        = cfg->ib_port,
-			.qp_access_flags = 0
+			.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE
 		};
 
 		if (ibv_modify_qp(ctx->qp, &attr,
@@ -649,9 +662,9 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 	
 	memcpy(ctx->send_buf + ctx->send_offset, msg->buf, msg->buf_size);
 	
-	struct start_t_entry * t_entry = find_entry(ctx->start_table, 10, dst->info.remote_key);
-	// todo: 累加一下 t_entry 其中的 total, 然后放入立即数里
-
+	// struct start_t_entry * t_entry = find_entry(ctx->start_table, 10, dst->info.remote_key);
+	// // todo: 累加一下 t_entry 其中的 total, 然后放入立即数里
+	// t_entry->r_mr_curr_total += msg->buf_size;
 	list.addr = (uintptr_t)(ctx->send_buf + ctx->send_offset);
 	list.length = msg->buf_size;
 	list.lkey = ctx->mr->lkey;
@@ -660,11 +673,11 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 	wr.sg_list = &list;
 	wr.num_sge = 1;
 	wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-	wr.send_flags = IBV_SEND_SIGNALED;
+	// wr.send_flags = IBV_SEND_SIGNALED;
 	wr.send_flags = ctx->send_flags;
-	wr.wr.rdma.remote_addr = dst->info.mr_addr; // 远程 buffer 地址
-	wr.wr.rdma.rkey = dst->info.remote_key;               // 远程 memory region 的 rkey
-	wr.imm_data = imm; // 传输立即数
+	wr.wr.rdma.remote_addr = (uintptr_t)dst->info.mr_addr; // 远程 buffer 地址
+	wr.wr.rdma.rkey = dst->info.remote_key   ;               // 远程 memory region 的 rkey
+	wr.imm_data = (u_int32_t)msg->buf_size; // 传输立即数
 
 	// wr.wr.ud.ah = dst->ah;
 	// wr.wr.ud.remote_qpn = dst->info.qpn;
@@ -679,7 +692,7 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 }
 
 // 其实write并不需要recv，但是with immediate 需要轮询recv，然后在业务层去处理这个立即数
-uint32_t pkt_vm_rdma_write_recv(void *info, struct transport_message *msg)
+int pkt_vm_rdma_write_recv(void *info, struct transport_message *msg)
 {
 	struct pkt_vm_rdma_context *ctx = info;
 	struct ibv_wc wc;
@@ -690,31 +703,40 @@ uint32_t pkt_vm_rdma_write_recv(void *info, struct transport_message *msg)
 	
 	if (wc.status != IBV_WC_SUCCESS) {
 		printf("wc failure status = %d.\n", wc.status);
+		printf("wc failure opcode = %d.\n", wc.opcode);
 		return 0;
 	}
 	
-	if (wc.opcode != IBV_WC_RECV) {
-		if (wc.opcode != IBV_WC_SEND) {
-			printf("wc failure opcode = %d.\n", wc.opcode);
-		}
-		
-		return 0;
-	}
+	// if (wc.opcode != IBV_WC_RECV) {
+	// 	if (wc.opcode != IBV_WC_SEND) {
+	// 		printf("wc failure opcode = %d.\n", wc.opcode);
+	// 	}
+	// 	return 0;
+	// }
 	
 	uint32_t imm_data;
 	// 检查是否成功接收到 RDMA Write with Immediate 的完成通知
 	if (wc.status == IBV_WC_SUCCESS && wc.opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
+		// if (wc.status == IBV_WC_SUCCESS || wc.opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
 		// 获取立即数，并将其从网络字节序转换为主机字节序
-		uint32_t imm_data = ntohl(wc.imm_data);
+		imm_data = wc.imm_data;
 		printf("Received immediate data: 0x%x\n", imm_data);
-	} else {
+	}else if (wc.opcode == IBV_WC_RDMA_WRITE){
+		printf("Have writen data to remote\n");
+		return 0;
+	}
+	else {
 		fprintf(stderr, "Failed to receive immediate data or wrong opcode\n");
 	}
-
+	// imm_data
+	// 把数据放进msg中去 TODO: 我不知道 write到对端，应该是在ibv_mr 里面还是在buffer里面
+	// msg->buf_size = (uintptr_t)ctx->mr->addr - (uintptr_t)imm_data;	// TODO: 我可以把这个转化成 uint32 吗；如果这个ctx->mr->addr是一个64位的，并且高位不是0呢？
+	// memcpy(ctx->mr->addr, msg->buf, msg->buf_size);
+	msg->buf_size = (int)imm_data;
+	memcpy(msg->buf, ctx->mr->addr, msg->buf_size);
 	// msg->buf = (void *)((char *)wc.wr_id);
 	// msg->buf_size = wc.byte_len;
-	
-	return imm_data;
+	return (int)imm_data;
 }
 
 int pkt_vm_rdma_recv(void *info, struct transport_message *msg)
@@ -819,6 +841,7 @@ static void *pkt_vm_rdma_init(struct transport_config *cfg)
 		return NULL;
 	}
 	
+	// 不需要receive
 	for (idx = 0; idx < cfg->rdma_cfg.rx_depth; idx++) {
 		ret = pkt_vm_rdma_post_recv(ctx, (ctx->buf + (idx * cfg->rdma_cfg.max_msg_size)));
 		if (ret != 0) {

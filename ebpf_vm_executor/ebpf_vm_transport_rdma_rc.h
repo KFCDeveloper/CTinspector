@@ -34,11 +34,17 @@ struct pkt_vm_rdma_state {
 	uint32_t unused:30;
 };
 
-// 每个远端内存对应一个起始位置，以及一个当前写的总量
-struct start_t_entry {
+// 执行write的peer: 每个远端内存对应一个起始位置，以及一个当前写的总量
+struct start_t_entry {	// mr at remote 
 	uint32_t rkey;
 	uint64_t r_mr_start;
 	uint64_t r_mr_curr_total;	// 已经写的总量
+};
+
+// been writen table entry/ 被远端write的peer：这里会记录每块内存上一次被写入的总内存
+struct writen_t_entry {
+	uint32_t rkey;
+	uint64_t r_mr_pre_total;	// 上一次的写入总量
 };
 
 struct pkt_vm_rdma_context {
@@ -61,6 +67,7 @@ struct pkt_vm_rdma_context {
 	struct rdma_addr_message local_addr;
 	struct ub_list dst_addr_list;
 	struct start_t_entry start_table[10];	// 假设注册的内存不会超过10块
+	struct writen_t_entry writen_table[10];	// 上一次从远端写入的写入总量，int32是因为立即数只能int32
 };
 
 #endif

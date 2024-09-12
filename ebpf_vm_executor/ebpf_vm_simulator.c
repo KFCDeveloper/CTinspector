@@ -491,10 +491,10 @@ void vm_executor_run_wr_rec(struct ebpf_vm_executor *executor)
 			}
 		}
 		
-		// msg_len = executor->transport->recv(executor->transport_ctx, &recv_msg);
-		uint32_t imme = executor->transport->recv(executor->transport_ctx, &recv_msg);
+		msg_len = executor->transport->recv(executor->transport_ctx, &recv_msg);
 		// 处理write过来的信息，在socket会交换起始的地址指针，此处32位 {block index(22 bits), offset(10 bits)}，一个block 1KB
-		
+		// 现在又不用了，只需要让立即数表示为使用的内存总量就行了
+
 		if (msg_len != 0) {
 			receive_vm(executor, recv_msg.buf, recv_msg.buf_size);
 			executor->transport->return_buf(executor->transport_ctx, &recv_msg);
