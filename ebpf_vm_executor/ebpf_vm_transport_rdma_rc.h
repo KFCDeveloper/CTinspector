@@ -24,8 +24,25 @@ struct rdma_addr_message {
 struct rdma_addr_info {
 	struct ub_list node;
 	struct node_url key;
-	struct rdma_addr_message info;
+	// struct rdma_addr_message info; // 保存本机
 	struct ibv_ah *ah;
+	// ctx 中的 local_addr 保存本端信息，mr_addr 和 remote_key 无用
+	// sender_info 和 recver_info 保存远端信息，mr_addr 和 remote_key 有用
+	// 其他属性是保存的 本端需要同对端通信的信息
+	char *send_buf;
+	int send_offset;
+
+	int if_send_init;
+	struct ibv_mr *send_mr;
+	struct ibv_qp *send_qp;
+	struct rdma_addr_message send_info;	// 本机为 sender ，保存对端 receiver 信息，mr_addr 和 remote_key 有用
+	struct rdma_addr_message local_send_info; // 本机为 sender  保存本端信息（包括send_qp的信息），mr_addr 和 remote_key 无用
+
+	int if_recv_init;
+	struct ibv_mr *recv_mr;
+	struct ibv_qp *recv_qp;
+	struct rdma_addr_message recv_info;	// 本机为 receiver ，保存对端 sender 信息
+	struct rdma_addr_message local_recv_info; // 本机为 receiver  保存本端信息（包括recv_qp的信息），mr_addr 和 remote_key 无用
 };
 
 struct pkt_vm_rdma_state {

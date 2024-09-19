@@ -61,6 +61,127 @@
                     "ignoreFailures": true
                 }
             ]
+        },
+        {
+            "name": "(gdb) 0_server",
+            "type": "cppdbg",
+            "request": "launch",
+            // program字段告诉 vscode 应该调试哪一个程序
+            "program": "/home/ydy/projects/CTinspector-master/build/ebpf_vm_test/vm_test", // 工程所在目录下/build/可执行文件名
+            "args": ["-a", "192.168.25.128",
+                        "-p", "1880", 
+                        "-d", "rocep2s1", 
+                        "-i", "1", 
+                        "-s", "4096", 
+                        "-r", "128", 
+                        "-g", "1", 
+                        "-t", "0", 
+                        ], // 用于设置程序的传入参数
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "为 gdb 启用整齐打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) 1_server",
+            "type": "cppdbg",
+            "request": "launch",
+            // program字段告诉 vscode 应该调试哪一个程序
+            "program": "/home/ydy/projects/CTinspector-master/build/ebpf_vm_test/vm_test", // 工程所在目录下/build/可执行文件名
+            "args": ["-a", "192.168.25.128",
+                        "-p", "1881", 
+                        "-d", "rocep2s1", 
+                        "-i", "1", 
+                        "-s", "4096", 
+                        "-r", "128", 
+                        "-g", "1", 
+                        "-t", "0", 
+                        ], // 用于设置程序的传入参数
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "为 gdb 启用整齐打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) 2_server",
+            "type": "cppdbg",
+            "request": "launch",
+            // program字段告诉 vscode 应该调试哪一个程序
+            "program": "/home/ydy/projects/CTinspector-master/build/ebpf_vm_test/vm_test", // 工程所在目录下/build/可执行文件名
+            "args": ["-a", "192.168.25.129",
+                        "-p", "1880", 
+                        "-d", "rocep2s1", 
+                        "-i", "1", 
+                        "-s", "4096", 
+                        "-r", "128", 
+                        "-g", "1", 
+                        "-t", "0", 
+                        ], // 用于设置程序的传入参数
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "为 gdb 启用整齐打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) 3_client",
+            "type": "cppdbg",
+            "request": "launch",
+            // program字段告诉 vscode 应该调试哪一个程序
+            "program": "/home/ydy/projects/CTinspector-master/build/ebpf_vm_test/vm_test", // 工程所在目录下/build/可执行文件名
+            "args": ["-a", "192.168.25.129",
+                        "-p", "1881", 
+                        "-d", "rocep2s1", 
+                        "-i", "1", 
+                        "-s", "4096", 
+                        "-r", "128", 
+                        "-g", "1", 
+                        "-t", "0", 
+                        "-f", "/home/ydy/projects/CTinspector-master/ebpf_example/vm_migrate.o",
+                        ], // 用于设置程序的传入参数
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "为 gdb 启用整齐打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+    ],
+    "compounds": [
+        {
+            "name": "ubuntu0",
+            "configurations": ["(gdb) 0_server", "(gdb) 1_server"],
+            "preLaunchTask": "${defaultBuildTask}",
+            "stopAll": true
         }
     ]
 }
