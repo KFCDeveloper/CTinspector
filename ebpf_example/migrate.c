@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <ebpf_vm_functions.h>
-#include <stdlib.h>
-#include <stdio.h>
+// #include <stdlib.h>
+// #include <stdio.h>
 
 void test_migrate(struct ub_address *a1, struct ub_address *a2, struct ub_address *b1, struct ub_address *b2, int cnt)
 {
@@ -12,19 +12,20 @@ void test_migrate(struct ub_address *a1, struct ub_address *a2, struct ub_addres
 	for (idx = 0; idx < cnt; idx++) {
 		debug_print(msg);
 		msg += 1000;
-		migrate_to(b2);
-		
-		debug_print(msg);
-		msg += 1000;
 		migrate_to(a1);
 
 		debug_print(msg);
 		msg += 1000;
+		migrate_to(b1);
+		
+		debug_print(msg);
+		msg += 1000;
 		migrate_to(a2);
+
 
 		debug_print(msg);
 		msg += 1000;
-		migrate_to(b1);
+		migrate_to(b2);
 	}
 }
 

@@ -3,7 +3,7 @@
 
 #include "ebpf_vm_transport.h"
 
-#define EXCH_MSG_PATTERN "0000:000000:000000:0000000000000000:00000000:00000000000000000000000000000000"
+#define EXCH_MSG_PATTERN "0000:000000:000000:0000000000000000:00000000:00000000:0000:00000000000000000000000000000000"
 #define GID_STR_SIZE 33
 // #define UD_GRH_SIZE 40
 
@@ -29,11 +29,13 @@ struct rdma_addr_info {
 	// ctx 中的 local_addr 保存本端信息，mr_addr 和 remote_key 无用
 	// sender_info 和 recver_info 保存远端信息，mr_addr 和 remote_key 有用
 	// 其他属性是保存的 本端需要同对端通信的信息
-	char *send_buf;
-	int send_offset;
+	char *buf;
+	// char *send_buf;
+	
 	int if_send_init;
 	struct ibv_mr *send_mr;
 	char *send_mr_buf;	// 专用于和mr绑定的buf
+	int send_offset;
 	struct ibv_qp *send_qp;
 	struct rdma_addr_message send_info;	// 本机为 sender ，保存对端 receiver 信息，mr_addr 和 remote_key 有用
 	struct rdma_addr_message local_send_info; // 本机为 sender  保存本端信息（包括send_qp的信息），mr_addr 和 remote_key 无用
