@@ -31,15 +31,16 @@ struct rdma_addr_info {
 	// 其他属性是保存的 本端需要同对端通信的信息
 	char *send_buf;
 	int send_offset;
-
 	int if_send_init;
 	struct ibv_mr *send_mr;
+	char *send_mr_buf;	// 专用于和mr绑定的buf
 	struct ibv_qp *send_qp;
 	struct rdma_addr_message send_info;	// 本机为 sender ，保存对端 receiver 信息，mr_addr 和 remote_key 有用
 	struct rdma_addr_message local_send_info; // 本机为 sender  保存本端信息（包括send_qp的信息），mr_addr 和 remote_key 无用
 
 	int if_recv_init;
 	struct ibv_mr *recv_mr;
+	char *recv_mr_buf;	// 专用于和mr绑定的buf
 	struct ibv_qp *recv_qp;
 	struct rdma_addr_message recv_info;	// 本机为 receiver ，保存对端 sender 信息
 	struct rdma_addr_message local_recv_info; // 本机为 receiver  保存本端信息（包括recv_qp的信息），mr_addr 和 remote_key 无用

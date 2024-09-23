@@ -84,27 +84,27 @@ static struct rdma_addr_info *pkt_vm_rdma_find_dest(struct pkt_vm_rdma_context *
 	return NULL;
 }
 
-static struct rdma_addr_info *pkt_vm_rdma_add_dest(struct pkt_vm_rdma_context *ctx, struct node_url *n, uint8_t *msg, int role)
+static struct rdma_addr_info *pkt_vm_rdma_add_dest(struct pkt_vm_rdma_context *ctx, struct node_url *n, uint8_t *msg, struct rdma_addr_info *dst, int role)
 {
-	struct rdma_addr_info *dst;
+	// struct rdma_addr_info *dst;
 	uint8_t gid_str[GID_STR_SIZE];
 	struct ibv_ah_attr ah_attr = {0};
 	
-	dst = malloc(sizeof(*dst));
-	if (dst == NULL) {
-		perror("Failed to allocate memory");
-		return NULL;
-	}
+	// dst = malloc(sizeof(*dst));
+	// if (dst == NULL) {
+	// 	perror("Failed to allocate memory");
+	// 	return NULL;
+	// }
 	
 	dst->key.ip = n->ip;
 	dst->key.port = n->port;
 	dst->key.reserved = 0;
 	
-	struct rdma_addr_message rdma_addr_info_instance = role? dst->send_info : dst->recv_info;
+	struct rdma_addr_message *rdma_addr_info_ptr = role? &dst->send_info : &dst->recv_info;
 	
 	// sscanf(msg, "%x:%x:%x:%s", &dst->info.lid, &dst->info.qpn, &dst->info.psn, gid_str);
-	sscanf(msg, "%04x:%06x:%06x:%016lx:%08x:%s", &rdma_addr_info_instance.lid, &rdma_addr_info_instance.qpn, &rdma_addr_info_instance.psn, &rdma_addr_info_instance.mr_addr, &rdma_addr_info_instance.remote_key, gid_str);
-	wire_gid_to_gid(gid_str, &rdma_addr_info_instance.gid);
+	sscanf(msg, "%04x:%06x:%06x:%016lx:%08x:%s", &rdma_addr_info_ptr->lid, &rdma_addr_info_ptr->qpn, &rdma_addr_info_ptr->psn, &rdma_addr_info_ptr->mr_addr, &rdma_addr_info_ptr->remote_key, gid_str);
+	wire_gid_to_gid(gid_str, &rdma_addr_info_ptr->gid);
 	// 如果一个rkey从未出现过，则创建一个 start_t_entry
 	// struct start_t_entry *result = find_entry(ctx->start_table, 10, dst->info.remote_key);
 	// if (result != NULL) {
@@ -127,14 +127,14 @@ static struct rdma_addr_info *pkt_vm_rdma_add_dest(struct pkt_vm_rdma_context *c
 	// 	}
 	// }
 	
-	if (rdma_addr_info_instance.gid.global.interface_id) {
+	if (rdma_addr_info_ptr->gid.global.interface_id) {
 		ah_attr.is_global = 1;
 		ah_attr.grh.hop_limit = 1;
-		ah_attr.grh.dgid = rdma_addr_info_instance.gid;
+		ah_attr.grh.dgid = rdma_addr_info_ptr->gid;
 		ah_attr.grh.sgid_index = ctx->cfg.gid_index;
 	}
 	
-	ah_attr.dlid = rdma_addr_info_instance.lid;
+	ah_attr.dlid = rdma_addr_info_ptr->lid;
 	ah_attr.port_num = ctx->cfg.ib_port;
 	dst->ah = ibv_create_ah(ctx->pd, &ah_attr);
 	if (!dst->ah) {
@@ -143,7 +143,7 @@ static struct rdma_addr_info *pkt_vm_rdma_add_dest(struct pkt_vm_rdma_context *c
 	}
 	
 	ub_list_push_back(&ctx->dst_addr_list, &dst->node);
-	printf_rdma_addr_message(&rdma_addr_info_instance);
+	printf_rdma_addr_message(rdma_addr_info_ptr);
 	return dst;
 }
 
@@ -211,11 +211,53 @@ static int pkt_vm_rdma_enable_qp_rc(struct pkt_vm_rdma_context *ctx,struct rdma_
 	return 0;
 }
 
+static int pkt_vm_rdma_get_qp_msg(struct pkt_vm_rdma_context *ctx, struct rdma_addr_info *dst, int role)
+{
+	struct rdma_transport_config *cfg = &ctx->cfg;
+	
+	if (ibv_query_port(ctx->context, cfg->ib_port, &ctx->portinfo)) {
+		fprintf(stderr, "Couldn't get port info\n");
+		return 1;
+	}
+	
+	if(!role) { // server: 0
+		dst->local_recv_info.lid = ctx->portinfo.lid;
+		dst->local_recv_info.qpn = dst->recv_qp->qp_num;
+		dst->local_recv_info.psn = lrand48() & 0xffffff;
+		
+		if (cfg->gid_index >= 0) {
+			if (ibv_query_gid(ctx->context, cfg->ib_port, cfg->gid_index, &dst->local_send_info.gid)) {
+				fprintf(stderr, "Couldn't get local gid for gid index %d\n", cfg->gid_index);
+				return 1;
+			}
+		} else {
+			memset(&dst->local_send_info.gid, 0, sizeof(&dst->local_send_info.gid));
+		}
+		printf_rdma_addr_message(&dst->local_send_info);
+
+	}else if (role) {	// client: 1
+		dst->local_send_info.lid = ctx->portinfo.lid;
+		dst->local_send_info.qpn = dst->send_qp->qp_num;
+		dst->local_send_info.psn = lrand48() & 0xffffff;
+		
+		if (cfg->gid_index >= 0) {
+			if (ibv_query_gid(ctx->context, cfg->ib_port, cfg->gid_index, &dst->local_send_info.gid)) {
+				fprintf(stderr, "Couldn't get local gid for gid index %d\n", cfg->gid_index);
+				return 1;
+			}
+		} else {
+			memset(&dst->local_send_info.gid, 0, sizeof(&dst->local_send_info.gid));
+		}
+		printf_rdma_addr_message(&dst->local_send_info);
+	}
+	// printf_rdma_addr_message(&ctx->local_addr);
+	return 0;
+}
 
 static int pkt_vm_rdma_enable_qp_rc_role(struct pkt_vm_rdma_context *ctx,struct rdma_addr_message *des, struct rdma_addr_info *dst, int role)
 {
 	struct ibv_qp *qp_to_modify = role? dst->send_qp:dst->recv_qp;
-	pkt_vm_rdma_get_qp_msg(ctx, dst, role); // 给local qp 赋值，但现在不需要了
+	pkt_vm_rdma_get_qp_msg(ctx, dst, role); // 给local qp 赋值
 	struct ibv_qp_attr attr = {
 		.qp_state		= IBV_QPS_RTR,
 		.path_mtu		= IBV_MTU_4096,
@@ -279,7 +321,7 @@ static int pkt_vm_rdma_enable_qp_rc_role(struct pkt_vm_rdma_context *ctx,struct 
 }
 
 
-static struct rdma_addr_info *pkt_vm_rdma_get_node_info(struct pkt_vm_rdma_context *ctx, struct node_url *server_url)
+/*static struct rdma_addr_info *pkt_vm_rdma_get_node_info(struct pkt_vm_rdma_context *ctx, struct node_url *server_url)
 {
 	uint8_t msg[sizeof(EXCH_MSG_PATTERN)];
 	struct sockaddr_in name = {0};
@@ -325,7 +367,7 @@ static struct rdma_addr_info *pkt_vm_rdma_get_node_info(struct pkt_vm_rdma_conte
 	
 	close(sockfd);
 	return pkt_vm_rdma_add_dest(ctx, server_url, msg, 1);
-}
+}*/
 
 static struct rdma_addr_info *pkt_vm_rdma_write_get_node_info(struct pkt_vm_rdma_context *ctx, struct node_url *server_url, struct rdma_addr_info *dst)
 {
@@ -356,8 +398,8 @@ static struct rdma_addr_info *pkt_vm_rdma_write_get_node_info(struct pkt_vm_rdma
 	// n = sprintf(msg, "%04x:%06x:%06x:", ctx->local_addr.lid,
 	// 			ctx->local_addr.qpn, ctx->local_addr.psn, (uint64_t)ctx->mr->addr, ctx->mr->rkey);
 	// 作为sender的时候，不需要把自己的 mr 和 rkey 发送过去
-	n = sprintf(msg, "%04x:%06x:%06x:%016lx:%08x:", ctx->local_addr.lid,
-            	ctx->local_addr.qpn, ctx->local_addr.psn, (uint64_t)0, 0);	// (uint64_t)dst->send_mr->addr, dst->send_mr->rkey
+	n = sprintf(msg, "%04x:%06x:%06x:%016lx:%08x:", dst->local_send_info.lid,
+            	dst->local_send_info.qpn, dst->local_send_info.psn, (uint64_t)dst->send_mr->addr, dst->send_mr->rkey);	// (uint64_t)dst->send_mr->addr, dst->send_mr->rkey
 	gid_to_wire_gid(&ctx->local_addr.gid, (msg + n));
 	
 	if (write(sockfd, msg, sizeof(msg)) != sizeof(msg)) {
@@ -376,30 +418,32 @@ static struct rdma_addr_info *pkt_vm_rdma_write_get_node_info(struct pkt_vm_rdma
 	
 	close(sockfd);
 	// todo: 实际上是重新创建了一个instance，这样不好
-	dst = pkt_vm_rdma_add_dest(ctx, server_url, msg, 1);	// as a sender
+	pkt_vm_rdma_add_dest(ctx, server_url, msg, dst, 1);	// as a sender
 }
 
-/**
- * 发送端 需要一个发送qp；接收端需要一个接收qp；想要进行一个单向的rdma write，就会建立两个qp，一个方向会有一对qp；
- * 连接一次socket，就需要创建一个mr和qp
- * 运行该方法的机子此时的角色  role: server: 0, client: 1
- */
-static void* pkt_vm_init_after_socket(struct pkt_vm_rdma_context *ctx, struct rdma_addr_message *dst_info, struct rdma_addr_info *dst, int role){
-	
+static void* create_before_socket(struct pkt_vm_rdma_context *ctx, struct rdma_addr_message *dst_info, struct rdma_addr_info *dst, int role){
 	if (role) { // client:1
-		dst->send_buf = ctx->buf + ctx->cfg.rx_depth * ctx->cfg.max_msg_size;
+		dst->send_buf = dst->send_buf + ctx->cfg.rx_depth * ctx->cfg.max_msg_size;
 		dst->send_offset = 0;
 	}
-	struct ibv_mr * mr_to_reg = role? dst->send_mr:dst->recv_mr;
+	struct ibv_mr * mr_to_reg;
+	struct ibv_mr ** mr_to_reg_ptr = role? &dst->send_mr:&dst->recv_mr;
+	char * mr_mapped_buf;
+	char ** mr_mapped_buf_ptr = role? &dst->send_mr_buf:&dst->recv_mr_buf;
+	// buf
+	*mr_mapped_buf_ptr = calloc(1, ctx->buf_size);
+	mr_mapped_buf = *mr_mapped_buf_ptr;
 	// reg mr
-	mr_to_reg = ibv_reg_mr(ctx->pd, ctx->buf, ctx->buf_size, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-	if (!ctx->mr) {
+	*mr_to_reg_ptr = ibv_reg_mr(ctx->pd, mr_mapped_buf, ctx->buf_size, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+	mr_to_reg = *mr_to_reg_ptr;
+	if (!mr_to_reg) {
 		fprintf(stderr, "Couldn't register MR\n");
 		goto clean_pd;
 	}
 	
 	// create qp
-	struct ibv_qp *qp_to_create = role? dst->send_qp:dst->recv_qp;
+	struct ibv_qp *qp_to_create;
+	struct ibv_qp **qp_to_create_ptr = role? &dst->send_qp:&dst->recv_qp;
 	{
 		struct ibv_qp_attr attr;
 		struct ibv_qp_init_attr init_attr = {
@@ -413,7 +457,8 @@ static void* pkt_vm_init_after_socket(struct pkt_vm_rdma_context *ctx, struct rd
 			},
 			.qp_type = IBV_QPT_RC,
 		};
-		qp_to_create = ibv_create_qp(ctx->pd, &init_attr);
+		*qp_to_create_ptr = ibv_create_qp(ctx->pd, &init_attr);
+		qp_to_create = *qp_to_create_ptr;
 		if (!qp_to_create) {
 			fprintf(stderr, "Couldn't create QP\n");
 			goto clean_cq;
@@ -424,6 +469,47 @@ static void* pkt_vm_init_after_socket(struct pkt_vm_rdma_context *ctx, struct rd
 			ctx->send_flags |= IBV_SEND_INLINE;
 		}
 	}
+	
+	return NULL;
+
+	clean_qp:
+	ibv_destroy_qp(qp_to_create);
+
+	clean_cq:
+		ibv_destroy_cq(ctx->cq);
+
+	clean_mr:
+		ibv_dereg_mr(mr_to_reg);
+
+	clean_pd:
+		ibv_dealloc_pd(ctx->pd);
+
+	clean_comp_channel:
+		if (ctx->channel)
+			ibv_destroy_comp_channel(ctx->channel);
+
+	clean_device:
+		ibv_close_device(ctx->context);
+
+	clean_buffer:
+		free(ctx->buf);
+
+	clean_ctx:
+		free(ctx);
+
+	return NULL;
+}
+
+
+/**
+ * 发送端 需要一个发送qp；接收端需要一个接收qp；想要进行一个单向的rdma write，就会建立两个qp，一个方向会有一对qp；
+ * 连接一次socket，就需要创建一个mr和qp
+ * 运行该方法的机子此时的角色  role: server: 0, client: 1
+ */
+static void* init_after_socket(struct pkt_vm_rdma_context *ctx, struct rdma_addr_message *dst_info, struct rdma_addr_info *dst, int role){
+	struct ibv_mr * mr_to_reg = role? dst->send_mr:dst->recv_mr;
+	struct ibv_qp *qp_to_create = role? dst->send_qp:dst->recv_qp;
+	
 	// qp init
 	{
 		struct ibv_qp_attr attr = {
@@ -562,12 +648,16 @@ static void *pkt_vm_rdma_server_main(void *arg)
 		client_url->ip = client_addr.sin_addr.s_addr;
 		client_url->port = ntohs(client_addr.sin_port);
 		client_url->reserved = 0;
-		struct rdma_addr_info *dst  = pkt_vm_rdma_add_dest(ctx, client_url, msg, 0);	// as a server
+
+		struct rdma_addr_info *dst = malloc(sizeof(*dst));
+		pkt_vm_rdma_add_dest(ctx, client_url, msg, dst, 0);	// as a server
 		dst->send_info = *dst_msg;
 		printf("run pkt_vm_rdma_enable_qp in pkt_vm_rdma_server_main!\n");
 		
 		if (dst->if_recv_init == 0) {
-			pkt_vm_init_after_socket(ctx, dst_msg, dst, 0); // role: server
+			create_before_socket(ctx, dst_msg, dst, 0);	// role: server
+			init_after_socket(ctx, dst_msg, dst, 0);	// role: server
+			// pkt_vm_init_after_socket(ctx, dst_msg, dst, 0); // role: server
 			// pkt_vm_rdma_enable_qp_rc(ctx, dst_msg);  
 			dst->if_recv_init = 1;
 		}
@@ -668,6 +758,7 @@ static struct pkt_vm_rdma_context *pkt_vm_rdma_init_ctx(struct rdma_transport_co
 	ctx->buf_size = 2 * cfg->rx_depth * cfg->max_msg_size;
 	ub_list_init(&ctx->dst_addr_list);
 	
+	// init buf
 	ctx->buf = calloc(1, ctx->buf_size);
 	if (!ctx->buf) {
 		fprintf(stderr, "Failed to allocate recv buf.\n");
@@ -828,50 +919,6 @@ static int pkt_vm_rdma_get_local_addr(struct pkt_vm_rdma_context *ctx)
 }
 
 
-
-static int pkt_vm_rdma_get_qp_msg(struct pkt_vm_rdma_context *ctx, struct rdma_addr_info *dst, int role)
-{
-	struct rdma_transport_config *cfg = &ctx->cfg;
-	
-	if (ibv_query_port(ctx->context, cfg->ib_port, &ctx->portinfo)) {
-		fprintf(stderr, "Couldn't get port info\n");
-		return 1;
-	}
-	
-	if(!role) { // server: 0
-		dst->local_recv_info.lid = ctx->portinfo.lid;
-		dst->local_recv_info.qpn = dst->recv_qp->qp_num;
-		dst->local_recv_info.psn = lrand48() & 0xffffff;
-		
-		if (cfg->gid_index >= 0) {
-			if (ibv_query_gid(ctx->context, cfg->ib_port, cfg->gid_index, &dst->local_send_info.gid)) {
-				fprintf(stderr, "Couldn't get local gid for gid index %d\n", cfg->gid_index);
-				return 1;
-			}
-		} else {
-			memset(&dst->local_send_info.gid, 0, sizeof(&dst->local_send_info.gid));
-		}
-		printf_rdma_addr_message(&dst->local_send_info);
-
-	}else if (role) {	// client: 1
-		dst->local_send_info.lid = ctx->portinfo.lid;
-		dst->local_send_info.qpn = dst->send_qp->qp_num;
-		dst->local_send_info.psn = lrand48() & 0xffffff;
-		
-		if (cfg->gid_index >= 0) {
-			if (ibv_query_gid(ctx->context, cfg->ib_port, cfg->gid_index, &dst->local_send_info.gid)) {
-				fprintf(stderr, "Couldn't get local gid for gid index %d\n", cfg->gid_index);
-				return 1;
-			}
-		} else {
-			memset(&dst->local_send_info.gid, 0, sizeof(&dst->local_send_info.gid));
-		}
-		printf_rdma_addr_message(&dst->local_send_info);
-	}
-	// printf_rdma_addr_message(&ctx->local_addr);
-	return 0;
-}
-
 int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *msg)
 {
 	struct pkt_vm_rdma_context *ctx = info;
@@ -887,11 +934,12 @@ int pkt_vm_rdma_send(void *info, struct node_url *n, struct transport_message *m
 	
 	if (dst == NULL) {
 		dst  = (struct rdma_addr_info *)malloc(sizeof(struct rdma_addr_info));
+		create_before_socket(ctx, NULL, dst, 1);	// role: client
 		// dst = pkt_vm_rdma_get_node_info(ctx, n);	// socket 发送端 (client)
-		dst = pkt_vm_rdma_write_get_node_info(ctx, n, dst);	// socket 发送端 (client)
+		pkt_vm_rdma_write_get_node_info(ctx, n, dst);	// socket 发送端 (client)
 		// 得到了对端的信息，modify qp
 		if (dst->if_send_init == 0){
-			pkt_vm_init_after_socket(ctx, &dst->send_info, dst, 1);	// role: client
+			init_after_socket(ctx, &dst->send_info, dst, 1);	// role: client
 			// pkt_vm_rdma_enable_qp_rc(ctx, &dst->info);
 			dst->if_send_init = 1;
 		}
@@ -1092,7 +1140,7 @@ static void *pkt_vm_rdma_init(struct transport_config *cfg)
 	// 	}
 	// }
 	
-	pkt_vm_rdma_get_local_addr(ctx);	// 现在这个方法不合适，需要对每个dst内的qp分别保存信息
+	// pkt_vm_rdma_get_local_addr(ctx);	// 现在这个方法不合适，需要对每个dst内的qp分别保存信息
 	// 作为代替的是 `pkt_vm_rdma_get_qp_msg`，因为本地有多个qp，所以qpn有多个，所以要在rdma_addr_info里面保存每个qp对应的local info
 	ret = pthread_create(&ctx->server_thread, NULL, pkt_vm_rdma_server_main, ctx);	// 每个机子都自身为服务器 (server)
 

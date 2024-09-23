@@ -180,7 +180,7 @@
         {
             "name": "ubuntu0",
             "configurations": ["(gdb) 0_server", "(gdb) 1_server"],
-            "preLaunchTask": "${defaultBuildTask}",
+            // "preLaunchTask": "${defaultBuildTask}",
             "stopAll": true
         }
     ]
